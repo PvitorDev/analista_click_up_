@@ -1,0 +1,112 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clickup
+      POSTGRES_PASSWORD: clickup
+      POSTGRES_DB: clickup_analyst
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clickup -d clickup_analyst"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: clickup
+    volumes:
+      - ./server/sql:/sql:ro
+    command:
+      - sh
+      - -c
+      - |
+        psql -h postgres -U clickup -d clickup_analyst -v ON_ERROR_STOP=1 -f /sql/schema.sql
+        psql -h postgres -U clickup -d clickup_analyst -v ON_ERROR_STOP=1 -f /sql/views.sql
+    restart: "no"
+
+  api:
+    build:
+      context: ./server
+    image: clickup-analyst-server:latest
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://clickup:clickup@postgres:5432/clickup_analyst
+      REDIS_URL: redis://redis:6379
+      HF_HOME: /cache/huggingface
+      FASTEMBED_CACHE_PATH: /cache/fastembed
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server:/app
+      - hfcache:/cache
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    image: clickup-analyst-server:latest
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://clickup:clickup@postgres:5432/clickup_analyst
+      REDIS_URL: redis://redis:6379
+      HF_HOME: /cache/huggingface
+      FASTEMBED_CACHE_PATH: /cache/fastembed
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+    depends_on:
+      api:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app
+      - hfcache:/cache
+    command: python -m app.worker
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      API_URL: http://api:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client:/app
+      - client_node_modules:/app/node_modules
+
+volumes:
+  pgdata:
+  redisdata:
+  hfcache:
+  client_node_modules:
