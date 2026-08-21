@@ -18,7 +18,7 @@
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "server/Dockerfile"
+dockerfilePath = "Dockerfile"
 watchPatterns = ["**"]
 
 [deploy]
