@@ -1,0 +1,17 @@
+# Railway — Worker de sync (mesmo repo/imagem que a API)
+#
+# Segundo serviço no mesmo projeto Railway:
+#   Settings → Root Directory = /server
+#   Settings → Config as Code = /railway.worker.toml
+#   Settings → Networking → sem domínio público (só processo interno)
+#
+# Variáveis: as mesmas da API (DATABASE_URL, REDIS_URL, CLICKUP_*, etc.)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["**"]
+
+[deploy]
+startCommand = "python -m app.worker"
+restartPolicyType = "ON_FAILURE"
